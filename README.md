@@ -1,199 +1,272 @@
 # Multigrid and Uzawa-Type Methods for the MAC Discretization of the Stokes Equations
 
-This repository contains three self-contained MATLAB programs for the final project in Numerical Linear Algebra.
+This repository contains MATLAB implementations of three iterative solvers for the MAC (marker-and-cell) discretization of the steady Stokes equations on a staggered grid.
 
-The code solves the MAC (marker-and-cell) discretization of the steady Stokes equations on a staggered grid by three different iterative frameworks:
+The project studies three related questions:
 
-1. V-cycle multigrid with the distributive Gauss-Seidel (DGS) smoother;
-2. Uzawa iteration with a conjugate-gradient (CG) solve for the velocity subproblem;
-3. Inexact Uzawa iteration with a multigrid-preconditioned conjugate-gradient (PCG) solve for the velocity subproblem.
+1. How effectively does a $V$-cycle multigrid method with the distributive Gauss-Seidel (DGS) smoother solve the full saddle-point system?
+2. How does the Uzawa iteration perform when the velocity subproblem is solved by conjugate gradient (CG)?
+3. How much can the Inexact Uzawa method be accelerated by using a multigrid-preconditioned conjugate gradient (PCG) solver for the velocity block?
 
-The repository is intentionally kept small: each problem is implemented in a single MATLAB file.
+This repository accompanies a final project for **Numerical Linear Algebra**.
 
-Files
-- `q1_multigrid_dgs.m`
-- `q2_uzawa_cg.m`
-- `q3_inexact_uzawa_pcg.m`
+* * *
 
---------------------------------------------------
-1. Model problem
---------------------------------------------------
+## Repository Structure
 
-We consider the steady Stokes equations on the unit square
+```text
+.
+├── q1_multigrid_dgs.m
+├── q2_uzawa_cg.m
+├── q3_inexact_uzawa_pcg.m
+└── README.md
+```
 
-    Omega = (0,1)^2
+Each MATLAB file is self-contained and corresponds to one part of the project:
 
-with velocity `u = (u,v)^T`, pressure `p`, and forcing `f = (f,g)^T`:
+- `q1_multigrid_dgs.m`: Problem 1, $V$-cycle multigrid with DGS smoothing;
+- `q2_uzawa_cg.m`: Problem 2, Uzawa iteration with CG solves of the velocity subproblem;
+- `q3_inexact_uzawa_pcg.m`: Problem 3, Inexact Uzawa iteration with a multigrid-preconditioned CG solve.
 
-    -Delta u + grad p = f    in Omega
-    div u = 0                in Omega
+* * *
+
+## Continuous Model
+
+We solve the steady Stokes equations on the unit square $\Omega = (0,1)^2$:
+
+```math
+-\Delta \mathbf{u} + \nabla p = \mathbf{f}, \qquad \nabla \cdot \mathbf{u} = 0 \quad \text{in } \Omega,
+```
+
+where $\mathbf{u} = (u,v)^\top$ is the velocity and $p$ is the pressure.
 
 The boundary conditions are mixed Dirichlet-Neumann conditions:
 
-For the horizontal velocity component:
-    du/dn = b   on y = 0
-    du/dn = t   on y = 1
-    u = 0       on x = 0, 1
+For the horizontal velocity component $u$,
 
-For the vertical velocity component:
-    dv/dn = l   on x = 0
-    dv/dn = r   on x = 1
-    v = 0       on y = 0, 1
+```math
+\frac{\partial u}{\partial n} = b \quad \text{on } y=0, \qquad
+\frac{\partial u}{\partial n} = t \quad \text{on } y=1, \qquad
+u = 0 \quad \text{on } x=0,1.
+```
 
-To verify the implementation, the code uses the manufactured exact solution
+For the vertical velocity component $v$,
 
-    u(x,y) = (1 - cos(2*pi*x)) * sin(2*pi*y)
-    v(x,y) = -(1 - cos(2*pi*y)) * sin(2*pi*x)
-    p(x,y) = x^3 / 3 - 1/12
+```math
+\frac{\partial v}{\partial n} = l \quad \text{on } x=0, \qquad
+\frac{\partial v}{\partial n} = r \quad \text{on } x=1, \qquad
+v = 0 \quad \text{on } y=0,1.
+```
 
-The forcing terms are obtained by substituting this exact solution into the Stokes equations:
+* * *
 
-    f1(x,y) = -4*pi^2*(2*cos(2*pi*x)-1)*sin(2*pi*y) + x^2
-    f2(x,y) =  4*pi^2*(2*cos(2*pi*y)-1)*sin(2*pi*x)
+## Manufactured Solution
 
-This allows the velocity error to be measured directly.
+To verify the implementation, the code uses the exact solution
 
---------------------------------------------------
-2. MAC staggered-grid discretization
---------------------------------------------------
+```math
+u(x,y) = \bigl(1-\cos(2\pi x)\bigr)\sin(2\pi y),
+```
 
-The code uses the standard MAC staggered grid.
+```math
+v(x,y) = -\bigl(1-\cos(2\pi y)\bigr)\sin(2\pi x),
+```
 
-For a mesh size `h = 1/N`:
+```math
+p(x,y) = \frac{x^3}{3} - \frac{1}{12}.
+```
 
-- the horizontal velocity `u` is stored on vertical cell faces,
-- the vertical velocity `v` is stored on horizontal cell faces,
-- the pressure `p` is stored at cell centers.
+Substituting this exact solution into the Stokes equations gives the forcing terms
 
-More precisely:
+```math
+f_1(x,y) = -4\pi^2\bigl(2\cos(2\pi x)-1\bigr)\sin(2\pi y) + x^2,
+```
 
-    u_{i,j-1/2} ~ u(x_i, y_{j-1/2})
-    v_{i-1/2,j} ~ v(x_{i-1/2}, y_j)
-    p_{i-1/2,j-1/2} ~ p(x_{i-1/2}, y_{j-1/2})
+```math
+f_2(x,y) = 4\pi^2\bigl(2\cos(2\pi y)-1\bigr)\sin(2\pi x).
+```
+
+The corresponding Neumann boundary data are generated automatically in the MATLAB codes.
+
+* * *
+
+## MAC Discretization
+
+We use the standard MAC staggered grid with mesh size $h = 1/N$.
+
+- The horizontal velocity is stored on vertical cell faces:
+  $u_{i,j-\frac12} \approx u(x_i, y_{j-\frac12})$.
+- The vertical velocity is stored on horizontal cell faces:
+  $v_{i-\frac12,j} \approx v(x_{i-\frac12}, y_j)$.
+- The pressure is stored at cell centers:
+  $p_{i-\frac12,j-\frac12} \approx p(x_{i-\frac12}, y_{j-\frac12})$.
 
 In the MATLAB implementation:
 
-- `u` has size `(N+1) x N`
-- `v` has size `N x (N+1)`
-- `p` has size `N x N`
+- `u` has size `(N+1) x N`,
+- `v` has size `N x (N+1)`,
+- `p` has size `N x N`.
 
 The discrete divergence at a cell center is
 
-    div_h(u,v) =
-        ( u(i+1,j) - u(i,j) ) / h
-      + ( v(i,j+1) - v(i,j) ) / h
-
-The discrete velocity error reported by the code is
-
-    e_N = h * sqrt( sum |u_h - u_exact|^2 + sum |v_h - v_exact|^2 )
-
-where the sums run over all staggered-grid velocity unknowns.
+```math
+(\nabla_h \cdot \mathbf{u})_{i-\frac12,j-\frac12}
+=
+\frac{u_{i+1,j}-u_{i,j}}{h}
++
+\frac{v_{i,j+1}-v_{i,j}}{h}.
+```
 
 The discrete Stokes system has the saddle-point form
 
-    [ A   B ] [ U ] = [ F ]
-    [ B^T 0 ] [ P ]   [ 0 ]
+```math
+\begin{pmatrix}
+A & B \\
+B^\top & 0
+\end{pmatrix}
+\begin{pmatrix}
+U \\
+P
+\end{pmatrix}
+=
+\begin{pmatrix}
+F \\
+0
+\end{pmatrix},
+```
 
 where:
-- `U` is the vector of all velocity unknowns,
-- `P` is the vector of all pressure unknowns,
-- `A` is the discrete velocity Laplacian block,
-- `B` is the discrete pressure-gradient operator.
 
-Because pressure is determined only up to an additive constant, the code normalizes pressure after each outer iteration by subtracting its mean.
+- $U$ is the vector of all velocity unknowns,
+- $P$ is the vector of all pressure unknowns,
+- $A$ is the discrete velocity Laplacian block,
+- $B$ is the discrete gradient operator.
 
---------------------------------------------------
-3. What each MATLAB file does
---------------------------------------------------
+Since pressure is only determined up to an additive constant, all three codes normalize the pressure by subtracting its mean after each outer iteration.
 
-3.1 `q1_multigrid_dgs.m`
+* * *
 
-This file solves the full MAC Stokes system by a V-cycle multigrid method with the distributive Gauss-Seidel (DGS) smoother.
+## Error Metric
 
-Main ingredients:
-- matrix-free stencil application;
-- DGS momentum relaxation;
-- local divergence correction;
-- restriction and prolongation between grids;
-- recursive V-cycle down to the coarsest grid.
+The velocity error reported by the codes is the discrete $L^2$-type error
 
-The DGS smoother consists of two parts:
+```math
+e_N
+=
+h\left(
+\sum_{j=1}^{N}\sum_{i=1}^{N-1}
+\left|u_{i,j-\frac12}-u(x_i,y_{j-\frac12})\right|^2
++
+\sum_{j=1}^{N-1}\sum_{i=1}^{N}
+\left|v_{i-\frac12,j}-v(x_{i-\frac12},y_j)\right|^2
+\right)^{1/2}.
+```
 
-(1) momentum relaxation:
-    approximately solve the velocity equations with pressure fixed;
+This is the quantity used in the project report to verify second-order accuracy.
 
-(2) divergence correction:
-    locally modify neighboring face velocities so that the discrete divergence defect is reduced or removed.
+* * *
 
-Default parameters:
+## Algorithms
+
+### 1. V-cycle Multigrid with DGS Smoothing
+
+The first solver applies a recursive $V$-cycle multigrid method to the full Stokes system.
+
+The smoother is the **distributive Gauss-Seidel (DGS)** method, which consists of two parts:
+
+1. a Gauss-Seidel relaxation step for the momentum equations;
+2. a local divergence-correction step to reduce the discrete incompressibility defect.
+
+At a high level, one $V$-cycle consists of:
+
+- $\nu_1$ pre-smoothing steps,
+- residual restriction to the next coarser grid,
+- recursive coarse-grid correction,
+- prolongation of the correction,
+- $\nu_2$ post-smoothing steps.
+
+The code is matrix-free: all operator applications are performed by finite-difference stencils rather than by assembling large sparse matrices.
+
+### 2. Uzawa Iteration with CG
+
+The second solver uses the classical Uzawa iteration:
+
+```math
+A U^{k+1} = F - B P^k,
+```
+
+```math
+P^{k+1} = P^k - \alpha \, \nabla_h \cdot U^{k+1}.
+```
+
+At each outer iteration, the velocity subproblem is solved by matrix-free conjugate gradient (CG).
+
+This method typically requires very few outer iterations, but the inner CG solve can become expensive if a very strict tolerance is used.
+
+### 3. Inexact Uzawa with Multigrid-Preconditioned CG
+
+The third solver replaces the exact or highly accurate velocity solve in Uzawa iteration by a preconditioned conjugate gradient method.
+
+At each outer iteration:
+
+1. form the shifted velocity right-hand side $F - B P^k$;
+2. approximately solve the velocity block by PCG;
+3. use a multigrid $V$-cycle as the preconditioner;
+4. update pressure by the discrete divergence.
+
+The multigrid preconditioner uses **symmetric Gauss-Seidel** smoothing, which is suitable for PCG.
+
+This method is designed to keep the number of outer Uzawa steps small while greatly reducing the cost of the velocity solve.
+
+* * *
+
+## Numerical Experiments
+
+### Problem 1: Multigrid Baseline
+
+`q1_multigrid_dgs.m` uses the default parameters
+
 - `N = 1024`
 - `coarsestN = 4`
 - `nu1 = 2`
 - `nu2 = 2`
 - `tol = 1e-8`
-- `maxCycles = 50`
 
-How to run:
-    results = q1_multigrid_dgs;
+The main quantities of interest are:
 
-or with explicit parameters:
-    results = q1_multigrid_dgs(1024, 4, 2, 2, 1e-8, 50);
+- the number of outer $V$-cycles,
+- the total runtime,
+- the final residual,
+- the velocity error.
 
-Expected behavior:
-- a small, almost grid-independent number of outer V-cycles;
-- second-order velocity accuracy;
-- much better efficiency than a basic smoother such as Jacobi.
+This experiment is meant to demonstrate:
 
---------------------------------------------------
-3.2 `q2_uzawa_cg.m`
+- second-order accuracy of the MAC discretization,
+- near grid-independent convergence of multigrid,
+- the effectiveness of DGS smoothing.
 
-This file solves the Stokes system by the Uzawa iteration.
+### Problem 2: Uzawa + CG
 
-The outer iteration is
+`q2_uzawa_cg.m` uses the default parameters
 
-    A U^{k+1} = F - B P^k
-    P^{k+1}   = P^k - alpha * div_h(U^{k+1})
-
-In the code, the velocity subproblem is solved by matrix-free conjugate gradient (CG).
-
-Default parameters:
 - `N = 256`
 - `alpha = 1.0`
 - `cgTol = 1e-10`
 - `tol = 1e-8`
-- `maxOuter = 50`
 
-How to run:
-    results = q2_uzawa_cg;
+The key outputs are:
 
-or with explicit parameters:
-    results = q2_uzawa_cg(256, 1.0, 1e-10, 1e-8, 50);
+- the number of outer Uzawa iterations,
+- the number of inner CG iterations per outer step,
+- the final residual,
+- the velocity error.
 
-Expected behavior:
-- very few outer Uzawa iterations;
-- but potentially many inner CG iterations;
-- therefore the method can be accurate but still expensive if the inner tolerance is too strict.
+This experiment shows that Uzawa may converge in very few outer steps, but the total computational cost depends strongly on the inner CG solve.
 
-Important note:
-This single-file version is written to be clear and self-contained.
-It keeps the main Uzawa + CG structure of the original project, but the inner stopping rule is written in a standard residual-based form.
+### Problem 3: Inexact Uzawa + PCG
 
---------------------------------------------------
-3.3 `q3_inexact_uzawa_pcg.m`
+`q3_inexact_uzawa_pcg.m` uses the default parameters
 
-This file solves the Stokes system by the Inexact Uzawa iteration.
-
-The outer iteration again updates pressure through the discrete divergence, but now the velocity subproblem is solved only approximately by PCG.
-
-At each outer step:
-- form the shifted velocity right-hand side `F - B P^k`,
-- solve the velocity equation approximately by PCG,
-- use a multigrid V-cycle as the preconditioner,
-- update pressure.
-
-The multigrid preconditioner uses symmetric Gauss-Seidel smoothing, which is appropriate for PCG.
-
-Default parameters:
 - `N = 1024`
 - `alpha = 1.0`
 - `nu1 = 2`
@@ -201,29 +274,65 @@ Default parameters:
 - `coarsestN = 2`
 - `pcgTol = 1e-3`
 - `tol = 1e-8`
-- `maxOuter = 50`
 - `firstOuterPCGSteps = 2`
 
-How to run:
-    results = q3_inexact_uzawa_pcg;
+The key outputs are:
 
-or with explicit parameters:
-    results = q3_inexact_uzawa_pcg(1024, 1.0, 2, 2, 2, 1e-3, 1e-8, 50, 2);
+- the number of outer Inexact Uzawa iterations,
+- the number of inner PCG iterations,
+- the final residual,
+- the velocity error.
 
-Expected behavior:
-- very few outer iterations;
-- only a few PCG steps per outer iteration;
-- overall efficiency comparable to the multigrid solver in Problem 1.
+This experiment demonstrates that a multigrid preconditioner can make the velocity solve much cheaper while preserving the efficiency of the outer iteration.
 
-Important note:
-This single-file version is a cleaned, standard inexact-Uzawa implementation.
-It is designed for readability and reproducibility, and its inner stopping rule is simpler than the original multi-file project code.
+* * *
 
---------------------------------------------------
-4. Returned output
---------------------------------------------------
+## How to Run
+
+Open MATLAB in the repository folder and run any of the following commands.
+
+### Problem 1
+
+```matlab
+results1 = q1_multigrid_dgs;
+```
+
+or with explicit parameters,
+
+```matlab
+results1 = q1_multigrid_dgs(1024, 4, 2, 2, 1e-8, 50);
+```
+
+### Problem 2
+
+```matlab
+results2 = q2_uzawa_cg;
+```
+
+or with explicit parameters,
+
+```matlab
+results2 = q2_uzawa_cg(256, 1.0, 1e-10, 1e-8, 50);
+```
+
+### Problem 3
+
+```matlab
+results3 = q3_inexact_uzawa_pcg;
+```
+
+or with explicit parameters,
+
+```matlab
+results3 = q3_inexact_uzawa_pcg(1024, 1.0, 2, 2, 2, 1e-3, 1e-8, 50, 2);
+```
+
+* * *
+
+## Returned Output
 
 Each function returns a MATLAB `struct` containing:
+
 - the problem size,
 - the solver parameters,
 - the number of outer iterations,
@@ -232,10 +341,12 @@ Each function returns a MATLAB `struct` containing:
 - the final velocity error,
 - the final arrays `u`, `v`, and `p`,
 - the residual history,
-- the error history,
-- and, for Q2 and Q3, the inner iteration counts.
+- the error history.
+
+For Problems 2 and 3, the returned struct also contains the inner iteration counts.
 
 Typical fields include:
+
 - `N`
 - `iterations`
 - `time`
@@ -247,58 +358,24 @@ Typical fields include:
 - `residualHistory`
 - `errorHistory`
 
-For Q2 and Q3 there is also:
+and, where appropriate,
+
 - `innerIterations`
 
---------------------------------------------------
-5. Interpreting the numerical results
---------------------------------------------------
+* * *
 
-For Problem 1 (multigrid with DGS):
-- the most important indicators are the number of V-cycles and the final velocity error;
-- the number of cycles should remain small as `N` increases;
-- this is the signature of an efficient multigrid method.
+## Notes
 
-For Problem 2 (Uzawa + CG):
-- the number of outer iterations may be very small;
-- however, the total runtime can still be large because the inner CG solve may be expensive.
-
-For Problem 3 (Inexact Uzawa + PCG):
-- the goal is to reduce the cost of the velocity solve while keeping the outer Uzawa iteration effective;
-- in a good regime, only a few PCG iterations are needed per outer step.
-
-When comparing timings, keep in mind:
-- runtime depends strongly on hardware,
-- runtime also depends on MATLAB version,
-- iteration counts and error levels are usually more stable than wall-clock time.
-
---------------------------------------------------
-6. Notes on implementation
---------------------------------------------------
-
-- All linear operators are applied in matrix-free form.
+- All three MATLAB programs are written in matrix-free form.
 - No large sparse matrix is assembled explicitly.
 - Pressure is normalized to zero mean after each outer iteration.
-- The multigrid codes assume that `N` is a power-of-two multiple of `coarsestN`.
-- The implementation is intentionally written in a direct and readable style rather than aggressively vectorized MATLAB style.
+- The multigrid solvers assume that `N` is a power-of-two multiple of `coarsestN`.
+- The code is written to be compact, readable, and easy to run directly from MATLAB.
 
---------------------------------------------------
-7. Minimal repository layout
---------------------------------------------------
+* * *
 
-A minimal clean repository can contain only:
+## Project Summary
 
-- `q1_multigrid_dgs.m`
-- `q2_uzawa_cg.m`
-- `q3_inexact_uzawa_pcg.m`
-- `README.md`
+A concise summary of this repository is:
 
-This is enough to reproduce the three parts of the project in a compact and understandable form.
-
---------------------------------------------------
-8. Suggested citation / project description
---------------------------------------------------
-
-Suggested one-sentence project summary:
-
-Implemented matrix-free MATLAB solvers for staggered-grid Stokes equations, including V-cycle multigrid with distributive Gauss-Seidel smoothing, Uzawa iteration with conjugate gradient velocity solves, and Inexact Uzawa iteration with multigrid-preconditioned conjugate gradient.
+Implemented matrix-free MATLAB solvers for staggered-grid Stokes equations, including $V$-cycle multigrid with distributive Gauss-Seidel smoothing, Uzawa iteration with conjugate gradient velocity solves, and Inexact Uzawa iteration with multigrid-preconditioned conjugate gradient.

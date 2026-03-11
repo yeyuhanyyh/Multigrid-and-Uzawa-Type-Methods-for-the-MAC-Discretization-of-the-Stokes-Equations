@@ -1,116 +1,322 @@
-# Stokes Solvers on a MAC Grid
+# Metropolis vs Cluster Monte Carlo for 2D Potts Model Sampling Efficiency Across Phase Transition
 
-This repository contains three self-contained MATLAB programs for the final project in Numerical Linear Algebra.
+This repository contains MATLAB code for comparing **single-spin Metropolis sampling** and **Wolff cluster Monte Carlo** for the **two-dimensional q-state Potts model** on a square lattice.
 
-Files
-- `q1_multigrid_dgs.m`
-- `q2_uzawa_cg.m`
-- `q3_inexact_uzawa_pcg.m`
+The project focuses on two related questions:
 
-Each file is standalone:
-- it builds the manufactured-solution test problem,
-- runs the corresponding solver,
-- prints a summary,
-- and returns a MATLAB `struct` with the numerical results.
+1. How accurately do Metropolis and Wolff estimate thermodynamic observables across the phase transition when the computational work is matched?
+2. How do the two samplers compare in terms of dynamical efficiency at the critical temperature?
 
-Model problem
-We solve the steady Stokes equations on the unit square `(0,1)^2`:
+This repository accompanies a final project for *Intro to Numerical Methods (18.335, MIT)*.
 
-`-Δu + ∇p = f`
-`∇·u = 0`
+---
 
-with mixed boundary conditions:
-- homogeneous Dirichlet conditions on the normal velocity boundaries,
-- Neumann conditions on the tangential velocity boundaries.
+## Repository Structure
 
-The manufactured solution used in the code is
+```text
+Metropolis-vs-Cluster-Monte-Carlo-for-2D-Potts-Model-Sampling-Efficiency-Across-Phase-Transition/
+├── codes/
+│   ├── Experiment_1.m
+│   ├── Experiment_2.m
+│   ├── calculateH.m
+│   └── calculateDeltaH.m
+├── Report.pdf
+├── final_project_requirement fall2025.pdf
+└── README.md
+```
 
-`u(x,y) = (1 - cos(2πx)) sin(2πy)`
-`v(x,y) = -(1 - cos(2πy)) sin(2πx)`
-`p(x,y) = x^3/3 - 1/12`
+---
 
-The forcing terms are generated from this exact solution, so the velocity error can be measured directly.
+## Model
 
-Grid layout
-The code uses the standard MAC staggered grid:
-- `u` is stored on vertical cell faces and has size `(N+1) x N`;
-- `v` is stored on horizontal cell faces and has size `N x (N+1)`;
-- `p` is stored at cell centers and has size `N x N`.
+We study the **2D q-state Potts model** on an `N × N` square lattice with periodic boundary conditions.
 
-Boundary values are stored explicitly in the outer rows or columns of `u` and `v`.
+Each spin takes values in
 
-What each file does
+```math
+\sigma_{ij} \in \{1,2,\dots,q\}.
+```
 
-1. `q1_multigrid_dgs.m`
-   Solves the full Stokes saddle-point system by a recursive V-cycle multigrid method with a distributive Gauss-Seidel (DGS) smoother.
+In the experiments implemented in this repository, the simulations are run in the **zero-field setting** with `J = 1` and `h = 0`.
 
-   Default parameters:
-   - `N = 1024`
-   - `coarsestN = 4`
-   - `nu1 = 2`
-   - `nu2 = 2`
-   - `tol = 1e-8`
+The Hamiltonian is
 
-2. `q2_uzawa_cg.m`
-   Solves the Stokes system by the Uzawa iteration.
-   At each outer step, the velocity subproblem is solved by matrix-free conjugate gradient (CG).
+```math
+H(\sigma) = -J \sum_{\langle x,y\rangle} \delta_{\sigma_x,\sigma_y},
+```
 
-   Default parameters:
-   - `N = 256`
-   - `alpha = 1.0`
-   - `cgTol = 1e-10`
-   - `tol = 1e-8`
+where the sum is over nearest-neighbor pairs and `\delta` is the Kronecker delta.
 
-3. `q3_inexact_uzawa_pcg.m`
-   Solves the Stokes system by the Inexact Uzawa iteration.
-   At each outer step, the velocity subproblem is solved by preconditioned conjugate gradient (PCG), where the preconditioner is a multigrid V-cycle with symmetric Gauss-Seidel smoothing.
+The Gibbs distribution at temperature `T` is
 
-   Default parameters:
-   - `N = 1024`
-   - `alpha = 1.0`
-   - `nu1 = 2`
-   - `nu2 = 2`
-   - `coarsestN = 2`
-   - `pcgTol = 1e-3`
-   - `tol = 1e-8`
-   - `firstOuterPCGSteps = 2`
+```math
+\pi_T(\sigma) \propto \exp\!\bigl(-\beta H(\sigma)\bigr),
+\qquad
+\beta = 1/T.
+```
 
-How to run
-Open MATLAB in the repository folder and call any of the three functions:
+For the 2D Potts model on the square lattice with `J = k_B = 1`, the critical temperature is
 
-`results1 = q1_multigrid_dgs;`
-`results2 = q2_uzawa_cg;`
-`results3 = q3_inexact_uzawa_pcg;`
+```math
+T_c = \frac{1}{\log(1+\sqrt{q})}.
+```
 
-You can also override the default parameters. For example:
+---
 
-`results1 = q1_multigrid_dgs(1024, 4, 2, 2, 1e-8, 50);`
-`results2 = q2_uzawa_cg(256, 1.0, 1e-10, 1e-8, 50);`
-`results3 = q3_inexact_uzawa_pcg(1024, 1.0, 2, 2, 2, 1e-3, 1e-8, 50, 2);`
+## Observables
 
-Returned output
-Each function returns a struct with fields such as:
-- the grid size,
-- the solver parameters,
-- the total runtime,
-- the number of outer iterations,
-- the final residual,
-- the final velocity error,
-- the final arrays `u`, `v`, `p`,
-- and the residual/error history.
+The main thermodynamic quantities studied in this project are the **energy density** and the **heat capacity**.
 
-Implementation notes
-- All operators are applied in matrix-free form by finite-difference stencils.
-- Pressure is normalized to have zero mean after each outer iteration. This removes the constant-pressure ambiguity.
-- The multigrid codes assume that `N` is a power-of-two multiple of `coarsestN`.
-- The code is written to stay close to the original project implementation, but the file structure and comments have been cleaned up and rewritten in English.
+The energy density is
 
-Suggested repository layout
-If you want a very small and clean repository, keep only these files:
+```math
+u(T) = \frac{1}{N^2}\,\mathbb{E}[H].
+```
 
-- `q1_multigrid_dgs.m`
-- `q2_uzawa_cg.m`
-- `q3_inexact_uzawa_pcg.m`
-- `README.md`
+The heat capacity is estimated from energy fluctuations as
 
-That is enough to reproduce the three parts of the project without dozens of helper files.
+```math
+c(T) = \frac{\beta^2}{N^2}\,\operatorname{Var}(H).
+```
+
+These are exactly the quantities plotted in the temperature-scan experiment.
+
+---
+
+## Algorithms
+
+### 1. Metropolis single-spin updates
+
+The Metropolis sampler proposes a change at one lattice site at a time.
+
+A proposed move from `\sigma` to `\sigma'` is accepted with probability
+
+```math
+a(\sigma \to \sigma')
+=
+\min\!\left\{1,\exp(-\beta \Delta H)\right\},
+```
+
+where `\Delta H = H(\sigma') - H(\sigma)`.
+
+In the implementation:
+
+- one proposal counts as **one flip-equivalent** of work;
+- energy is recorded once per sweep, where one sweep means `N^2` flip-equivalents.
+
+### 2. Wolff cluster updates
+
+The Wolff method grows a same-spin cluster and recolors it in one move.
+
+A nearest neighbor of a cluster site is added to the cluster with probability
+
+```math
+p_{\mathrm{add}} = 1 - \exp(-\beta J).
+```
+
+In the implementation:
+
+- the computational work of one Wolff update is measured by the **cluster size**;
+- cluster size is counted in flip-equivalents so that the total work can be fairly compared with Metropolis.
+
+---
+
+## Experiment 1: Temperature Scan Under Matched Work
+
+`Experiment_1.m` scans a temperature grid and compares Metropolis and Wolff under **equal work**.
+
+### Goal
+
+For each temperature, estimate:
+
+- energy density,
+- heat capacity,
+- uncertainty across repeated runs.
+
+### Work normalization
+
+To make the comparison fair, this script measures work in **spin flips**.
+
+A single sweep is defined as:
+
+```math
+1 \text{ sweep} = N^2 \text{ flip-equivalents}.
+```
+
+The two methods are normalized as follows:
+
+- **Metropolis:** each single-spin proposal counts as 1 flip;
+- **Wolff:** each cluster update counts as the size of the cluster.
+
+Energy is recorded once per accumulated sweep-equivalent work.
+
+### What the script does
+
+- scans temperature from high `T` to low `T`,
+- uses an annealed warm start across the temperature grid,
+- discards a prescribed number of burn-in sweeps at each temperature,
+- repeats the experiment several times,
+- plots mean values with standard-error bars.
+
+### Main outputs
+
+For each parameter setting, the script produces:
+
+- a plot of energy density versus temperature,
+- a plot of heat capacity versus temperature,
+- console logs summarizing the run settings.
+
+---
+
+## Experiment 2: Dynamical Comparison at the Critical Temperature
+
+`Experiment_2.m` compares the dynamical efficiency of Metropolis and Wolff at the critical temperature.
+
+### Goal
+
+At
+
+```math
+T = T_c = \frac{1}{\log(1+\sqrt{q})},
+```
+
+the script records an energy time series and estimates:
+
+- integrated autocorrelation time,
+- effective sample size,
+- cost per effective sample.
+
+### Integrated autocorrelation time
+
+Let `\rho(k)` denote the lag-`k` autocorrelation of the recorded energy sequence. The code uses the estimator
+
+```math
+\tau_{\mathrm{int}} = 1 + 2 \sum_{k=1}^{K} \rho(k),
+```
+
+where `K` is chosen by positive-sequence truncation.
+
+### Effective sample size
+
+If the recorded time series has length `n`, then the code defines
+
+```math
+\mathrm{ESS} = \frac{n}{\tau_{\mathrm{int}}}.
+```
+
+### Cost per effective sample
+
+The code also reports
+
+```math
+\mathrm{Cost/ESS} = \frac{\text{total flip-equivalents}}{\mathrm{ESS}}.
+```
+
+This gives a fair efficiency comparison between the two algorithms after normalizing by computational work.
+
+### Main outputs
+
+For each setting, the script prints:
+
+- estimated IACT,
+- estimated ESS,
+- total work in flip-equivalents,
+- Cost/ESS.
+
+---
+
+## File Overview
+
+### `codes/Experiment_1.m`
+
+Temperature scan under matched work.
+
+This script compares Metropolis and Wolff across a range of temperatures and plots:
+
+- `u(T)` for energy density,
+- `c(T)` for heat capacity.
+
+### `codes/Experiment_2.m`
+
+Dynamics comparison at the critical temperature.
+
+This script evaluates:
+
+- integrated autocorrelation time,
+- effective sample size,
+- cost per effective sample.
+
+### `codes/calculateH.m`
+
+Computes the total Hamiltonian of the current Potts configuration with periodic boundary conditions.
+
+### `codes/calculateDeltaH.m`
+
+Computes the local energy change for a proposed single-spin update.  
+This is used in the Metropolis acceptance step.
+
+---
+
+## Requirements
+
+- MATLAB R2019b or newer
+- No additional toolboxes are required
+
+---
+
+## How to Run
+
+Open MATLAB, enter the `codes` directory, and run the desired script.
+
+### Run Experiment 1
+
+```matlab
+cd codes
+run('Experiment_1.m')
+```
+
+### Run Experiment 2
+
+```matlab
+cd codes
+run('Experiment_2.m')
+```
+
+---
+
+## Parameters You May Want to Change
+
+At the top of each script, you can adjust parameters such as:
+
+- lattice size `N`,
+- number of Potts states `q`,
+- temperature grid,
+- burn-in length,
+- number of kept sweeps,
+- number of repeats,
+- work budget for each method.
+
+The default settings are suitable for quick tests and sanity checks. For more accurate experiments, see the parameter choices discussed in `Report.pdf`.
+
+---
+
+## Notes and Conventions
+
+- Periodic boundary conditions are used throughout.
+- All work comparisons are normalized in **flip-equivalents**.
+- In this repository, one sweep always means `N^2` flip-equivalents.
+- The Wolff method is compared against Metropolis under this shared work convention.
+- The experiments in the scripts are run in the zero-field case.
+
+---
+
+## Included Documents
+
+- `Report.pdf` — final project report
+- `final_project_requirement fall2025.pdf` — original project handout
+
+---
+
+## Author
+
+Yuhan Ye

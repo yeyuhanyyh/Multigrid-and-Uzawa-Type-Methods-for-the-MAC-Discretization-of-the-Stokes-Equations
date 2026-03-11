@@ -2,7 +2,7 @@
 
 This repository contains MATLAB implementations of three iterative solvers for the MAC (marker-and-cell) discretization of the steady Stokes equations on a staggered grid. The project compares a full V-cycle multigrid solver with distributive Gauss--Seidel smoothing, the classical Uzawa iteration with conjugate gradient velocity solves, and an Inexact Uzawa method with a multigrid-preconditioned conjugate gradient solver.
 
-The code is organized into three self-contained MATLAB files, one for each part of the project.
+The code is organized into three self-contained MATLAB files, one for each part of the project. For detailed derivations, algorithmic discussions, and additional numerical results, please refer to the project report: [Final_Project_Report_for_Numerical_Linear_Algebra.pdf](./Final_Project_Report_for_Numerical_Linear_Algebra.pdf).
 
 ---
 
